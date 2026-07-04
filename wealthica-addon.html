@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WealthOps Export</title>
+<style>
+  body { font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; color: #1a2129; margin: 0; padding: 18px; }
+  h2 { font-size: 17px; margin: 0 0 4px; }
+  .sub { color: #6b7a88; font-size: 12.5px; margin-bottom: 14px; }
+  button { background: #0f1419; color: #d4af6a; border: 1px solid #d4af6a; border-radius: 8px; padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  #status { margin-top: 12px; font-size: 13px; color: #6b7a88; white-space: pre-line; }
+  .ok { color: #2e7d32; } .err { color: #c62828; }
+  table { border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+  td, th { padding: 4px 10px; border-bottom: 1px solid #e3e8ee; text-align: left; }
+</style>
+</head>
+<body>
+<h2>WealthOps Export</h2>
+<div class="sub">Read-only: pulls your Wealthica balances and stages them in WealthOps (localhost:8321) for your review. Nothing is changed in Wealthica.</div>
+<button id="send" disabled>Send snapshot to WealthOps</button>
+<div id="status">Waiting for Wealthica…</div>
+<div id="preview"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@wealthica/wealthica.js/dist/addon.min.js"></script>
+<script>
+'use strict';
+var addon = new Addon();
+var payload = null;
+
+function status(msg, cls) {
+  var el = document.getElementById('status');
+  el.textContent = msg; el.className = cls || '';
+}
+
+function load() {
+  status('Loading data from Wealthica…');
+  Promise.all([
+    addon.api.getInstitutions({}).catch(function () { return []; }),
+    addon.api.getAssets({}).catch(function () { return []; }),
+    addon.api.getLiabilities({}).catch(function () { return []; }),
+  ]).then(function (r) {
+    payload = { asOf: new Date().toISOString(), institutions: r[0] || [], assets: r[1] || [], liabilities: r[2] || [] };
+    var nAcct = 0;
+    (payload.institutions || []).forEach(function (i) { nAcct += ((i.investments || i.accounts || []).length || 1); });
+    var rows = '';
+    (payload.institutions || []).forEach(function (i) {
+      rows += '<tr><td>' + (i.name || i.id) + '</td><td>' + ((i.investments || i.accounts || []).length || '—') + '</td></tr>';
+    });
+    document.getElementById('preview').innerHTML = payload.institutions.length
+      ? '<table><tr><th>Institution</th><th>Accounts</th></tr>' + rows + '</table>' : '';
+    status('Ready: ' + payload.institutions.length + ' institutions / ~' + nAcct + ' accounts, '
+      + payload.assets.length + ' manual assets, ' + payload.liabilities.length + ' liabilities.');
+    document.getElementById('send').disabled = false;
+  }).catch(function (e) { status('Failed to load from Wealthica: ' + (e && e.message || e), 'err'); });
+}
+
+addon.on('init', function () { load(); });
+addon.on('reload', function () { load(); });
+
+document.getElementById('send').onclick = function () {
+  if (!payload) return;
+  status('Sending to WealthOps…');
+  var WEALTHOPS = location.hostname.endsWith('github.io') ? 'https://localhost:8322' : '';
+  fetch(WEALTHOPS + '/api/wealthica/import', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  }).then(function (r) { return r.json(); }).then(function (j) {
+    if (j.ok) {
+      status('Done — ' + j.staged + ' rows staged. Review them in WealthOps → Assets → Valuations & Wealthica.', 'ok');
+      try { addon.toastSuccess({ message: 'Sent to WealthOps: ' + j.staged + ' rows staged' }); } catch (e) {}
+    } else status('WealthOps error: ' + (j.error || 'unknown'), 'err');
+  }).catch(function (e) { status('Could not reach WealthOps at localhost:8321 — is the app running? ' + e.message, 'err'); });
+};
+</script>
+</body>
+</html>
