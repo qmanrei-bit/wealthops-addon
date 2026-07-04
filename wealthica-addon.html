@@ -58,6 +58,14 @@ function load() {
 addon.on('init', function () { load(); });
 addon.on('reload', function () { load(); });
 
+function downloadSnapshot() {
+  var name = 'wealthica-snapshot-' + new Date().toISOString().slice(0, 10) + '.json';
+  addon.downloadFile({ fileName: name, fileType: 'application/json;charset=utf-8;', fileContent: JSON.stringify(payload) })
+    .then(function () {
+      status('Snapshot downloaded as ' + name + '.\nIn WealthOps: Assets → Valuations & Wealthica → "Import snapshot file" and pick it from Downloads.', 'ok');
+    }).catch(function (e) { status('Download failed: ' + (e && e.message || e), 'err'); });
+}
+
 document.getElementById('send').onclick = function () {
   if (!payload) return;
   status('Sending to WealthOps…');
@@ -69,7 +77,11 @@ document.getElementById('send').onclick = function () {
       status('Done — ' + j.staged + ' rows staged. Review them in WealthOps → Assets → Valuations & Wealthica.', 'ok');
       try { addon.toastSuccess({ message: 'Sent to WealthOps: ' + j.staged + ' rows staged' }); } catch (e) {}
     } else status('WealthOps error: ' + (j.error || 'unknown'), 'err');
-  }).catch(function (e) { status('Could not reach WealthOps at localhost:8321 — is the app running? ' + e.message, 'err'); });
+  }).catch(function () {
+    // Chrome blocks iframe → localhost requests; fall back to a snapshot file
+    status('Direct send blocked by the browser — downloading the snapshot instead…');
+    downloadSnapshot();
+  });
 };
 </script>
 </body>
